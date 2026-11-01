@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PayHero Test</title>
+<style>
+  body{font-family:Arial,sans-serif;max-width:420px;margin:40px auto;padding:16px}
+  input,button{width:100%;padding:12px;margin:8px 0;font-size:16px;box-sizing:border-box}
+  button{background:#16a34a;color:#fff;border:0;border-radius:8px;cursor:pointer}
+  button:disabled{background:#999}
+  #out{margin-top:16px;padding:12px;border-radius:8px;background:#eee;white-space:pre-wrap}
+  .ok{background:#d4edda!important}.bad{background:#f8d7da!important}
+</style>
+</head>
+<body>
+<h2>PayHero Test</h2>
+<input id="phone" type="tel" placeholder="0712345678">
+<input id="amount" type="number" placeholder="Amount (KES)" value="10">
+<button id="btn" onclick="pay()">Pay Now</button>
+<div id="out">Waiting...</div>
+
+<script>
+const API = "https://YOUR-SERVICE.onrender.com";   // <-- change this
+const out = document.getElementById("out");
+const btn = document.getElementById("btn");
+let timer = null;
+
+function show(msg, cls){ out.textContent = msg; out.className = cls || ""; }
+
+async function pay(){
+  const phone = document.getElementById("phone").value.trim();
+  const amount = document.getElementById("amount").value;
+  if(!phone || !amount){ show("Enter phone and amount","bad"); return; }
+
+  btn.disabled = true;
+  show("Sending STK push... (first request may take up to a minute if the server is waking up)");
+
+  try{
+    const r = await fetch(API + "/pay", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({phone, amount, reference:"WebTest"})
+    });
+    const d = await r.json();
+    if(!d.success){ show("Failed: " + (d.message||"unknown"), "bad"); btn.disabled=false; return; }
+    show("Check your phone and enter your PIN.\nReference: " + d.reference);
+    poll(d.reference);
+  }catch(e){
+    show("Connection error: " + e.message, "bad");
+    btn.disabled = false;
+  }
+}
+
+function poll(ref){
+  let n = 0;
+  clearInterval(timer);
+  timer = setInterval(async ()=>{
+    n++;
+    try{
+      const r = await fetch(API + "/status/" + encodeURIComponent(ref));
+      const d = await r.json();
+      show("Check " + n + "/40 - state: " + d.state + " (PayHero: " + d.raw + ")\nReference: " + ref);
+      if(d.state === "COMPLETED"){
+        clearInterval(timer);
+        show("PAYMENT SUCCESSFUL\nReference: " + ref, "ok");
+        btn.disabled = false;
+      } else if(d.state === "FAILED"){
+        clearInterval(timer);
+        show("PAYMENT FAILED\nReference: " + ref, "bad");
+        btn.disabled = false;
+      }
+    }catch(e){ /* keep polling on network hiccup */ }
+    if(n >= 40){
+      clearInterval(timer);
+      show("Timed out. Check Render logs.\nReference: " + ref, "bad");
+      btn.disabled = false;
+    }
+  }, 3000);
+}
+</script>
+</body>
+</html>
